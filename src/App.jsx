@@ -1,4 +1,5 @@
 import { useState, useEffect } from "react";
+import { supabase } from "./supabase";
 import {
   LineChart,
   Line,
@@ -10,52 +11,9 @@ import {
 } from "recharts";
 
 function App() {
-  const [orders, setOrders] = useState(() => {
-    const savedOrders = localStorage.getItem("orders");
-  
-    if (savedOrders) {
-      return JSON.parse(savedOrders);
-    }
-  
-    return [
-      {
-        id: 1,
-        customer: "David",
-        product: "Rice",
-        grams: 2000,
-        amount: 4000,
-        status: "Active",
-        createdAt: "15/06/2026 09:00",
-      },
-      {
-        id: 2,
-        customer: "Mary",
-        product: "Beans",
-        grams: 1000,
-        amount: 2500,
-        status: "Active",
-        createdAt: "15/06/2026 10:15",
-      },
-      {
-        id: 3,
-        customer: "Joshua",
-        product: "Rice",
-        grams: 1500,
-        amount: 3000,
-        status: "Active",
-        createdAt: "15/06/2026 11:20",
-      },
-      {
-        id: 4,
-        customer: "David",
-        product: "Garri",
-        grams: 1000,
-        amount: 1500,
-        status: "Active",
-        createdAt: "15/06/2026 12:05",
-      },
-    ];
-  });
+  const [orders, setOrders] = useState([]);
+
+  const [products, setProducts] = useState([]);
 
   const [customer, setCustomer] = useState("");
   const [product, setProduct] = useState("");
@@ -63,9 +21,57 @@ function App() {
   const [amount, setAmount] = useState("");
 const [search, setSearch] = useState("");
 
-  useEffect(() => {
-    localStorage.setItem("orders", JSON.stringify(orders));
-  }, [orders]);
+useEffect(() => {
+  fetchOrders();
+  fetchProducts();
+}, []);
+
+const fetchOrders = async () => {
+  const { data, error } = await supabase
+    .from("orders")
+    .select("*")
+    .order("id", { ascending: false });
+
+  if (error) {
+    console.error(error);
+    return;
+  }
+
+  const formattedOrders = data.map((order) => ({
+    id: order.id,
+    customer: order.customer,
+    product: order.product,
+    grams: order.grams,
+    amount: order.amount,
+    status: order.status,
+    createdAt: new Date(
+      order.created_at
+    ).toLocaleString(),
+  }));
+
+  setOrders(formattedOrders);
+};
+
+const fetchProducts = async () => {
+  const { data, error } = await supabase
+    .from("products")
+    .select("*")
+    .order("name");
+
+  if (error) {
+    console.error(error);
+    return;
+  }
+
+  setProducts(data);
+};
+
+// useEffect(() => {
+//   localStorage.setItem(
+//     "orders",
+//     JSON.stringify(orders)
+//   );
+// }, [orders]);
   
   const voidOrder = (id) => {
     setOrders(
@@ -155,58 +161,77 @@ const chartData = Object.entries(dailySales).map(
     productStats[order.product].revenue += order.amount;
   });
 
-  const inventory = {
-    Rice: 50000,
-    Beans: 20000,
-    Garri: 15000,
-  };
-  
-  const inventoryStatus = Object.keys(inventory).map(
-    (product) => {
-      const sold =
-        productStats[product]?.grams || 0;
-  
-      return {
-        product,
-        remaining: inventory[product] - sold,
-        sold,
-      };
-    }
-  );
+  const inventoryStatus = products.map((item) => ({
+  product: item.name,
+  remaining: item.stock,
+  sold: productStats[item.name]?.grams || 0,
+}));
 
-  const addOrder = () => {
-    if (!customer || !product || !grams || !amount) {
-      alert("Please fill all fields");
-      return;
-    }
+  const addOrder = async () => {
+  if (!customer || !product || !grams || !amount) {
+    alert("Please fill all fields");
+    return;
+  }
 
-    const newOrder = {
-      id: Date.now(),
+  const selectedProduct = products.find(
+  (item) => item.name === product
+);
 
+if (!selectedProduct) {
+  alert("Product not found");
+  return;
+}
+
+if (selectedProduct.stock < Number(grams)) {
+  alert("Not enough stock available");
+  return;
+}
+
+const { error } = await supabase
+  .from("orders")
+  .insert([
+    {
       customer:
         customer.trim().charAt(0).toUpperCase() +
         customer.trim().slice(1).toLowerCase(),
 
-      product:
-        product.trim().charAt(0).toUpperCase() +
-        product.trim().slice(1).toLowerCase(),
-
+      product,
       grams: Number(grams),
-
       amount: Number(amount),
-
       status: "Active",
+    },
+  ]);
 
-      createdAt: new Date().toLocaleString(),
-    };
+if (error) {
+  console.error(error);
+  alert("Failed to save order");
+  return;
+}
 
-    setOrders([...orders, newOrder]);
+await supabase
+  .from("products")
+  .update({
+    stock:
+      selectedProduct.stock -
+      Number(grams),
+  })
+  .eq("id", selectedProduct.id);
 
-    setCustomer("");
-    setProduct("");
-    setGrams("");
-    setAmount("");
-  };
+  await fetchProducts();
+
+  if (error) {
+    console.error(error);
+    alert("Failed to save order");
+    return;
+  }
+
+  await fetchOrders();
+
+  setCustomer("");
+  setProduct("");
+  setGrams("");
+  setAmount("");
+};
 
   return (
     <div style={{ padding: "20px", fontFamily: "Arial" }}>
@@ -223,11 +248,21 @@ const chartData = Object.entries(dailySales).map(
       <br />
       <br />
 
-      <input
-        placeholder="Product"
-        value={product}
-        onChange={(e) => setProduct(e.target.value)}
-      />
+      <select
+  value={product}
+  onChange={(e) => setProduct(e.target.value)}
+>
+  <option value="">Select Product</option>
+
+  {products.map((item) => (
+    <option
+      key={item.id}
+      value={item.name}
+    >
+      {item.name}
+    </option>
+  ))}
+</select>
 
       <br />
       <br />
@@ -503,6 +538,16 @@ const chartData = Object.entries(dailySales).map(
     marginBottom: "20px",
   }}
 />
+
+<h2>Products From Database</h2>
+
+<ul>
+  {products.map((product) => (
+    <li key={product.id}>
+      {product.name} - {product.stock.toLocaleString()}g
+    </li>
+  ))}
+</ul>
 
 <h2>Recent Orders</h2>
 
