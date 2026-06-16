@@ -235,7 +235,7 @@ await supabase
 
   return (
     <div style={{ padding: "20px", fontFamily: "Arial" }}>
-      <h1>Food Sales Dashboard</h1>
+      <h1>Uche Sales Dashboard</h1>
 
       <h2>Add Order</h2>
 
